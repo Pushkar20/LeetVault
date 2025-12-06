@@ -1,0 +1,9 @@
+{
+  "REPO_PATH": "",
+  "PYTHON_CMD": "python",
+  "EVAL_CMD": "",
+  "GIT_PUSH": true,
+  "GIT_REMOTE_NAME": "origin",
+  "GIT_BRANCH": "",
+  "COMMIT_MSG_TEMPLATE": "Auto-sync: {title} | {time}s | {mem}KB"
+}
