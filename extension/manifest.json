@@ -1,10 +1,28 @@
 {
   "manifest_version": 3,
-  "name": "Local LeetCode Sync",
-  "version": "1.0",
+  "name": "LeetVault Sync",
+  "version": "1.0.0",
+  "description": "Sync LeetCode Accepted solutions to local backend with local evaluation + git auto-commit.",
+  
+  "permissions": [
+    "scripting",
+    "activeTab"
+  ],
+
+  "host_permissions": [
+    "http://localhost:5005/*",
+    "http://127.0.0.1:5005/*"
+  ],
+
   "content_scripts": [
     {
-      "matches": ["https://leetcode.com/*"],
+      "matches": [
+        "https://leetcode.com/*",
+        "https://www.leetcode.com/*",
+        "https://*.leetcode.com/*",
+        "https://leetcode.cn/*",
+        "https://*.leetcode.cn/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_idle"
     }

@@ -16,6 +16,7 @@ import uvicorn
 import json, os, subprocess, shlex
 from pathlib import Path
 from typing import Optional
+from fastapi.middleware.cors import CORSMiddleware
 
 from evaluator.evaluator import evaluate
 
@@ -112,6 +113,14 @@ def commit_changes(repo_path: Path, commit_msg: str):
 # ---------------- FASTAPI SERVER ---------------- #
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://leetcode.com", "http://localhost:5005", "*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.post("/sync")
 async def sync(request: Request):

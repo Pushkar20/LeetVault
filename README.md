@@ -1,5 +1,5 @@
-# 🧠 LeetCode Local Sync + Auto-Evaluate + Auto-Commit  
-A secure, local-first alternative to LeetHub — fully open-source, fully private.
+# 🧠 LeetVault
+LeetCode Local Sync + Auto-Evaluate + Auto-Commit 
 
 
 ![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?logo=python&logoColor=white)
@@ -133,8 +133,7 @@ pip install fastapi uvicorn psutil
 
 ## 5. Run the backend server
 ```bash
-cd server
-uvicorn server:app --reload --port 5005
+python -m uvicorn server.server:app --reload --port 5005
 ```
 
 The server listens at: <http://localhost:5005/sync>
