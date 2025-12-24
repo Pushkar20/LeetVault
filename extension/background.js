@@ -58,11 +58,19 @@ chrome.debugger.onEvent.addListener(async (source, method, params) => {
 
         const slugMatch = request.url.match(/problems\/([^/]+)\//);
 
+        // Ask content script for question AT SUBMIT TIME
+        const { question } = await chrome.tabs.sendMessage(
+            source.tabId,
+            { type: "GET_QUESTION_TEXT" }
+        );
+        console.log("[LeetVault] Question length:", question?.length);
+
         lastSubmitPayload = {
             code: body.typed_code,
             language: body.lang,
             questionId: body.question_id,
-            slug: slugMatch ? slugMatch[1] : "unknown"
+            slug: slugMatch ? slugMatch[1] : "unknown",
+            question: question || ""
         };
 
         console.log("[LeetVault] Code captured at submit");
@@ -122,7 +130,8 @@ chrome.debugger.onEvent.addListener(async (source, method, params) => {
             language: submission.language,
             runtime: json.status_runtime,
             memory: json.status_memory,
-            code: submission.code
+            code: submission.code,
+            question: submission.question
         });
       }, 0);
     }

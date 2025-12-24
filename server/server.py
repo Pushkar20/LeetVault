@@ -19,6 +19,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+import threading
+
+GIT_LOCK = threading.Lock()
+
+
 # -------------------------------------------------
 # Config
 # -------------------------------------------------
@@ -62,20 +67,25 @@ class Submission(BaseModel):
     runtime: str
     memory: str
     code: str
+    question: str = ""
 
 # -------------------------------------------------
 # Helpers
 # -------------------------------------------------
 
-def git_commit(problem_dir: Path, message: str):
-    subprocess.run(["git", "add", str(problem_dir)], cwd=REPO_PATH, check=True)
-    subprocess.run(["git", "commit", "-m", message], cwd=REPO_PATH, check=True)
+def git_commit(problem_dir, commit_msg):
+    with GIT_LOCK:
+        subprocess.run(
+            ["git", "add", str(problem_dir)],
+            cwd=REPO_PATH,
+            check=True
+        )
+        subprocess.run(
+            ["git", "commit", "-m", commit_msg],
+            cwd=REPO_PATH,
+            check=True
+        )
 
-    if GIT_PUSH:
-        cmd = ["git", "push", GIT_REMOTE]
-        if GIT_BRANCH:
-            cmd.append(GIT_BRANCH)
-        subprocess.run(cmd, cwd=REPO_PATH, check=True)
 
 def fetch_problem_meta(question_id: str):
     """
@@ -155,7 +165,13 @@ def sync_solution(sub: Submission):
     readme_path.write_text(
         f"""# {sub.id}. {title}
 
-## LeetCode Submission
+## Problem Statement
+
+{sub.question}
+
+---
+
+## Solution Performance
 
 - **Language:** {sub.language}
 - **Runtime:** {sub.runtime}
@@ -167,7 +183,7 @@ def sync_solution(sub: Submission):
     )
 
     commit_msg = COMMIT_TEMPLATE.format(
-        title=sub.title,
+        title=title,
         lc_time=sub.runtime,
         lc_mem=sub.memory
     )
