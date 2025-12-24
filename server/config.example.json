@@ -1,8 +1,7 @@
 {
-  "REPO_PATH": "",
-  "PYTHON_CMD": "python",
-  "GIT_PUSH": true,
+  "REPO_PATH": "/absolute/path/to/leetcode-solutions",
+  "GIT_PUSH": false,
   "GIT_REMOTE_NAME": "origin",
   "GIT_BRANCH": "",
-  "COMMIT_MSG_TEMPLATE": "Auto-sync: {title} | local={time:.5f}s/{mem:.2f}KB | leetcode={lc_time}/{lc_mem}"
+  "COMMIT_MSG_TEMPLATE": "Auto-sync: {title} | leetcode={lc_time}/{lc_mem}"
 }
