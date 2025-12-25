@@ -26,7 +26,13 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
    Attach CDP
 --------------------------------------------------------- */
 function attachDebugger(tabId) {
-  if (attachedTabId === tabId) return;
+  if (attachedTabId === tabId) {
+    // Already attached
+    return;
+  }
+
+  // Defensive detach in case MV3 lost state
+  chrome.debugger.detach({ tabId }, () => {});
 
   chrome.debugger.attach({ tabId }, "1.3", () => {
     if (chrome.runtime.lastError) {

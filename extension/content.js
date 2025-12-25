@@ -37,3 +37,30 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
+/* ---------------------------------------------------------
+    Submit-aware attach debugger
+--------------------------------------------------------- */
+function isSubmitButton(el) {
+  return (
+    el &&
+    el.tagName === "BUTTON" &&
+    el.innerText.trim().toLowerCase() === "submit"
+  );
+}
+
+document.addEventListener(
+  "click",
+  (e) => {
+    const btn = e.target.closest("button");
+    if (!isSubmitButton(btn)) return;
+
+    // 🔑 Re-notify background BEFORE submit happens
+    chrome.runtime.sendMessage({
+      type: "LEETCODE_TAB_READY"
+    });
+
+    console.log("[LeetVault] Submit clicked → ensuring debugger attached");
+  },
+  true
+);
+
