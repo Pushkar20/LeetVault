@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "LeetVault",
-  "version": "3.0",
+  "version": "3.1",
   "description": "Automatically sync accepted LeetCode submissions (CDP-based)",
   "permissions": [
     "debugger",
@@ -19,5 +19,8 @@
       "matches": ["https://leetcode.com/problems/*"],
       "js": ["content.js"]
     }
-  ]
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  }
 }

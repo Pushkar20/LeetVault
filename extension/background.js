@@ -3,6 +3,7 @@
    ========================================================= */
 
 let attachedTabId = null;
+let leetcodeTabId = null;
 
 const STATUS_ACCEPTED = 10;
 const BACKEND_URL = "http://127.0.0.1:5005/sync";
@@ -13,11 +14,16 @@ const synced = new Set();
 
 let lastSubmitPayload = null;
 
+let debuggerAttached = false;
+let lastActiveAt = null;
+
+
 /* ---------------------------------------------------------
    Listen for LeetCode tab
 --------------------------------------------------------- */
 chrome.runtime.onMessage.addListener((msg, sender) => {
   if (msg?.type === "LEETCODE_TAB_READY" && sender.tab?.id) {
+    leetcodeTabId = sender.tab.id;
     attachDebugger(sender.tab.id);
   }
 });
@@ -26,29 +32,42 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
    Attach CDP
 --------------------------------------------------------- */
 function attachDebugger(tabId) {
-  if (attachedTabId === tabId) {
-    // Already attached
-    return;
-  }
-
-  // Defensive detach in case MV3 lost state
-  chrome.debugger.detach({ tabId }, () => {});
-
   chrome.debugger.attach({ tabId }, "1.3", () => {
     if (chrome.runtime.lastError) {
+      // Ignore "already attached" errors
+      if (
+        chrome.runtime.lastError.message?.includes("Another debugger is already attached")
+      ) {
+        debuggerAttached = true;
+        attachedTabId = tabId;
+        return;
+      }
+
       console.error(
         "[LeetVault] Debugger attach failed:",
         chrome.runtime.lastError.message
       );
+      debuggerAttached = false;
       return;
     }
 
     attachedTabId = tabId;
+    debuggerAttached = true;
+    lastActiveAt = Date.now();
+
     console.log("[LeetVault] Debugger attached");
 
-    chrome.debugger.sendCommand({ tabId }, "Network.enable");
+    chrome.debugger.sendCommand({ tabId }, "Network.enable", () => {
+      if (chrome.runtime.lastError) {
+        console.warn(
+          "[LeetVault] Network.enable failed:",
+          chrome.runtime.lastError.message
+        );
+      }
+    });
   });
 }
+
 
 /* ---------------------------------------------------------
    CDP Event Listener
@@ -78,7 +97,7 @@ chrome.debugger.onEvent.addListener(async (source, method, params) => {
             slug: slugMatch ? slugMatch[1] : "unknown",
             question: question || ""
         };
-
+        lastActiveAt = Date.now();
         console.log("[LeetVault] Code captured at submit");
       }
     }
@@ -170,6 +189,34 @@ function getResponseBody(tabId, requestId) {
     );
   });
 }
+
+/* ---------------------------------------------------------
+    Expose status for popup
+--------------------------------------------------------- */
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.type === "GET_STATUS") {
+    sendResponse({
+      debuggerAttached,
+      lastActiveAt
+    });
+    return true;
+  }
+
+  if (msg?.type === "FORCE_REATTACH") {
+    if (typeof leetcodeTabId === "number") {
+      console.log(
+        "[LeetVault] Manual debugger re-attach requested for LeetCode tab",
+        leetcodeTabId
+      );
+      attachDebugger(leetcodeTabId);
+    } else {
+      console.warn("[LeetVault] No LeetCode tab known yet");
+    }
+
+    sendResponse({ ok: true });
+    return true;
+  }
+});
 
 /* ---------------------------------------------------------
    Backend sync
