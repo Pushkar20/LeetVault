@@ -64,3 +64,39 @@ document.addEventListener(
   true
 );
 
+/* ---------------------------------------------------------
+   Detect question change (Single Page App)
+--------------------------------------------------------- */
+let lastProblemSlug = null;
+
+function getCurrentProblemSlug() {
+  const match = window.location.pathname.match(/\/problems\/([^/]+)/);
+  return match ? match[1] : null;
+}
+
+function notifyIfProblemChanged() {
+  const slug = getCurrentProblemSlug();
+  if (!slug || slug === lastProblemSlug) return;
+
+  lastProblemSlug = slug;
+
+  chrome.runtime.sendMessage({
+    type: "LEETCODE_TAB_READY"
+  });
+
+  console.log("[LeetVault] Problem changed → re-arming debugger:", slug);
+}
+
+// Observe SPA navigation
+const observer = new MutationObserver(() => {
+  notifyIfProblemChanged();
+});
+
+observer.observe(document.body, {
+  childList: true,
+  subtree: true
+});
+
+// Initial call
+notifyIfProblemChanged();
+

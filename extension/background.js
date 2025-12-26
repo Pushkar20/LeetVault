@@ -1,42 +1,58 @@
 /* =========================================================
-   LeetVault – FINAL background.js (FIXED)
+   LeetVault – background.js (FINAL, CLEAN)
    ========================================================= */
+
+const BACKEND_URL = "http://127.0.0.1:5005/sync";
+const STATUS_ACCEPTED = 10;
 
 let attachedTabId = null;
 let leetcodeTabId = null;
 
-const STATUS_ACCEPTED = 10;
-const BACKEND_URL = "http://127.0.0.1:5005/sync";
-
-// submissionId (string) -> { code, language, questionId }
-const pendingSubmissions = new Map();
-const synced = new Set();
-
 let lastSubmitPayload = null;
+
+const pendingSubmissions = new Map(); // submissionId -> payload
+const synced = new Set();             // submissionIds already synced
 
 let debuggerAttached = false;
 let lastActiveAt = null;
 
-
 /* ---------------------------------------------------------
-   Listen for LeetCode tab
+   Listen for LeetCode tab readiness & popup actions
 --------------------------------------------------------- */
-chrome.runtime.onMessage.addListener((msg, sender) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === "LEETCODE_TAB_READY" && sender.tab?.id) {
     leetcodeTabId = sender.tab.id;
-    attachDebugger(sender.tab.id);
+    attachDebugger(leetcodeTabId);
+  }
+
+  if (msg?.type === "GET_STATUS") {
+    sendResponse({ debuggerAttached, lastActiveAt });
+    return true;
+  }
+
+  if (msg?.type === "FORCE_REATTACH") {
+    if (typeof leetcodeTabId === "number") {
+      console.log(
+        "[LeetVault] Manual debugger re-attach requested for LeetCode tab",
+        leetcodeTabId
+      );
+      attachDebugger(leetcodeTabId);
+    }
+    sendResponse({ ok: true });
+    return true;
   }
 });
 
 /* ---------------------------------------------------------
-   Attach CDP
+   Attach Chrome Debugger (safe)
 --------------------------------------------------------- */
 function attachDebugger(tabId) {
   chrome.debugger.attach({ tabId }, "1.3", () => {
     if (chrome.runtime.lastError) {
-      // Ignore "already attached" errors
       if (
-        chrome.runtime.lastError.message?.includes("Another debugger is already attached")
+        chrome.runtime.lastError.message?.includes(
+          "Another debugger is already attached"
+        )
       ) {
         debuggerAttached = true;
         attachedTabId = tabId;
@@ -57,113 +73,164 @@ function attachDebugger(tabId) {
 
     console.log("[LeetVault] Debugger attached");
 
-    chrome.debugger.sendCommand({ tabId }, "Network.enable", () => {
-      if (chrome.runtime.lastError) {
-        console.warn(
-          "[LeetVault] Network.enable failed:",
-          chrome.runtime.lastError.message
-        );
+    chrome.debugger.sendCommand(
+      { tabId },
+      "Network.enable",
+      {},
+      () => {
+        if (chrome.runtime.lastError) {
+          console.warn(
+            "[LeetVault] Network.enable failed:",
+            chrome.runtime.lastError.message
+          );
+        }
       }
-    });
+    );
   });
 }
 
-
 /* ---------------------------------------------------------
-   CDP Event Listener
+   CDP Network Listener
 --------------------------------------------------------- */
 chrome.debugger.onEvent.addListener(async (source, method, params) => {
   try {
-    /* 1. Capture SUBMIT request */
-    if (method === "Network.requestWillBeSent") {
-      const { request } = params;
+    /* ------------------------------
+       SUBMIT REQUEST
+    ------------------------------ */
+    if (
+      method === "Network.requestWillBeSent" &&
+      params.request.url.includes("/submit/") &&
+      params.request.postData
+    ) {
+      const body = JSON.parse(params.request.postData);
+      const slugMatch = params.request.url.match(/problems\/([^/]+)\//);
 
-      if (request.url.includes("/submit/") && request.postData) {
-        const body = JSON.parse(request.postData);
+      const { question } = await chrome.tabs.sendMessage(
+        source.tabId,
+        { type: "GET_QUESTION_TEXT" }
+      );
 
-        const slugMatch = request.url.match(/problems\/([^/]+)\//);
+      lastSubmitPayload = {
+        code: body.typed_code,
+        language: body.lang,
+        questionId: body.question_id,
+        slug: slugMatch ? slugMatch[1] : "unknown",
+        question: question || ""
+      };
 
-        // Ask content script for question AT SUBMIT TIME
-        const { question } = await chrome.tabs.sendMessage(
-            source.tabId,
-            { type: "GET_QUESTION_TEXT" }
-        );
-        console.log("[LeetVault] Question length:", question?.length);
-
-        lastSubmitPayload = {
-            code: body.typed_code,
-            language: body.lang,
-            questionId: body.question_id,
-            slug: slugMatch ? slugMatch[1] : "unknown",
-            question: question || ""
-        };
-        lastActiveAt = Date.now();
-        console.log("[LeetVault] Code captured at submit");
-      }
+      lastActiveAt = Date.now();
+      console.log("[LeetVault] Code captured at submit");
     }
 
-    /* 2. Capture SUBMIT response (submission_id) */
-    if (method === "Network.responseReceived") {
-      const url = params.response.url;
+    /* ------------------------------
+       SUBMIT RESPONSE
+       (submission_id + possible Accepted)
+    ------------------------------ */
+    if (
+      method === "Network.responseReceived" &&
+      params.response.url.includes("/submit/")
+    ) {
+      const body = await getResponseBody(source.tabId, params.requestId);
+      if (!body || !lastSubmitPayload) return;
 
-      if (url.includes("/submit/")) {
-        const body = await getResponseBody(source.tabId, params.requestId);
-        if (!body || !lastSubmitPayload) return;
+      const json = JSON.parse(body);
+      const submissionId = String(json.submission_id);
+      if (!submissionId) return;
 
-        const json = JSON.parse(body);
-        const submissionId = String(json.submission_id);
-        if (!submissionId) return;
+      pendingSubmissions.set(submissionId, lastSubmitPayload);
+      console.log("[LeetVault] submission_id linked:", submissionId);
 
-        pendingSubmissions.set(submissionId, lastSubmitPayload);
-        lastSubmitPayload = null;
-
-        console.log(
-          "[LeetVault] submission_id linked:",
-          submissionId
-        );
+      if (
+        json.status_code === STATUS_ACCEPTED ||
+        json.state === "SUCCESS" ||
+        json.status === "ACCEPTED"
+      ) {
+        attemptSync(submissionId, json);
       }
+
+      lastSubmitPayload = null;
     }
 
-    /* 3. Detect ACCEPTED via /check/ */
+    /* ------------------------------
+       CHECK RESPONSE (fallback path)
+    ------------------------------ */
     if (
       method === "Network.responseReceived" &&
       params.response.url.includes("/submissions/detail/") &&
       params.response.url.endsWith("/check/")
     ) {
       const submissionId = extractSubmissionId(params.response.url);
-      if (!submissionId || synced.has(submissionId)) return;
+      if (!submissionId) return;
 
       const body = await getResponseBody(source.tabId, params.requestId);
       if (!body) return;
 
       const json = JSON.parse(body);
-      if (json.status_code !== STATUS_ACCEPTED) return;
 
-      const submission = pendingSubmissions.get(submissionId);
-      if (!submission) return;
+      if (
+        json.status_code === STATUS_ACCEPTED ||
+        json.state === "SUCCESS"
+      ) {
+        attemptSync(submissionId, json);
+      }
+    }
 
-      synced.add(submissionId);
-      pendingSubmissions.delete(submissionId);
-
-      console.log("[LeetVault] Accepted:", submissionId);
-
-      setTimeout(() => {
-        syncToBackend({
-            id: submission.questionId,
-            slug: submission.slug,
-            title: "", // backend can derive from slug
-            language: submission.language,
-            runtime: json.status_runtime,
-            memory: json.status_memory,
-            code: submission.code,
-            question: submission.question
-        });
-      }, 0);
+    /* ------------------------------
+       ACCEPTED VIA BANNER API
+       (UI verdict path)
+    ------------------------------ */
+    if (
+      method === "Network.responseReceived" &&
+      params.response.url.includes("/api/banner/qd-submission-banner/")
+    ) {
+      const lastSubmissionId = Array.from(pendingSubmissions.keys()).pop();
+      if (lastSubmissionId) {
+        attemptSync(lastSubmissionId, {});
+      }
     }
   } catch (err) {
     console.error("[LeetVault] CDP error:", err);
   }
 });
+
+/* ---------------------------------------------------------
+   Attempt backend sync (single-shot)
+--------------------------------------------------------- */
+function attemptSync(submissionId, resultJson) {
+  if (synced.has(submissionId)) return;
+
+  const submission = pendingSubmissions.get(submissionId);
+  if (!submission) return;
+
+  synced.add(submissionId);
+  pendingSubmissions.delete(submissionId);
+
+  console.log("[LeetVault] Accepted:", submissionId);
+  console.log("[LeetVault] Syncing to backend…");
+
+  (async () => {
+    let runtime = resultJson.status_runtime || "";
+    let memory = resultJson.status_memory || "";
+
+    // Banner-based Accepted → fetch performance explicitly
+    if (!runtime && !memory) {
+      const details = await fetchSubmissionDetails(submissionId);
+      runtime = details.runtime || "";
+      memory = details.memory || "";
+    }
+
+    syncToBackend({
+      id: submission.questionId,
+      slug: submission.slug,
+      title: "",
+      language: submission.language,
+      runtime,
+      memory,
+      code: submission.code,
+      question: submission.question
+    });
+  })();
+}
 
 /* ---------------------------------------------------------
    Helpers
@@ -190,40 +257,31 @@ function getResponseBody(tabId, requestId) {
   });
 }
 
-/* ---------------------------------------------------------
-    Expose status for popup
---------------------------------------------------------- */
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg?.type === "GET_STATUS") {
-    sendResponse({
-      debuggerAttached,
-      lastActiveAt
-    });
-    return true;
-  }
+async function fetchSubmissionDetails(submissionId) {
+  try {
+    const res = await fetch(
+      `https://leetcode.com/submissions/detail/${submissionId}/`,
+      { credentials: "include" }
+    );
 
-  if (msg?.type === "FORCE_REATTACH") {
-    if (typeof leetcodeTabId === "number") {
-      console.log(
-        "[LeetVault] Manual debugger re-attach requested for LeetCode tab",
-        leetcodeTabId
-      );
-      attachDebugger(leetcodeTabId);
-    } else {
-      console.warn("[LeetVault] No LeetCode tab known yet");
-    }
+    if (!res.ok) return {};
 
-    sendResponse({ ok: true });
-    return true;
+    const text = await res.text();
+
+    // Extract JSON embedded in the page
+    const match = text.match(/submissionDetail:\s*(\{.*?\})\s*,/s);
+    if (!match) return {};
+
+    return JSON.parse(match[1]);
+  } catch {
+    return {};
   }
-});
+}
 
 /* ---------------------------------------------------------
    Backend sync
 --------------------------------------------------------- */
 async function syncToBackend(payload) {
-  console.log("[LeetVault] Syncing to backend…");
-
   try {
     const res = await fetch(BACKEND_URL, {
       method: "POST",
